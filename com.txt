@@ -1,0 +1,1 @@
+./ssm_ged -d ../test/dataset/graph_g.txt -q ../test/dataset/graph_q.txt -t 2
