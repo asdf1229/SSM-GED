@@ -36,22 +36,22 @@ int main(int argc, char *argv[]) {
     string data_graph_file = data_option->value();
 	string query_graph_file = query_option->value();
 
-    // data graph G, query graph q
-    Graph *data_graph = new Graph();
+    // query graph q, data graph G, 
     Graph *query_graph = new Graph();
+    Graph *data_graph = new Graph();
 
     map<string, int> vM, eM;
-    load_graph(data_graph_file, data_graph, vM, eM);
+
     load_graph(query_graph_file, query_graph, vM, eM);
+    load_graph(data_graph_file, data_graph, vM, eM);
 
     // // print graphs
-    // data_graph->print_graph();
     // query_graph->print_graph();
-
+    // data_graph->print_graph();
 
     // candidate filtering
     vector<vector<ui> > candidates;
-    bool res = calVerticesFilter(data_graph, query_graph, candidates);
+    bool res = calVerticesFilter(query_graph, data_graph, candidates);
 
     // // print candidates
     // printf("Number of query vertices: %lu %u\n", candidates.size(), query_graph->getVerticesCount());
@@ -71,15 +71,22 @@ int main(int argc, char *argv[]) {
 
     // generate order
     vector<ui> order;
-    generateQueryOrder(data_graph, query_graph, candidates, order);
+    generateQueryOrder(query_graph, data_graph, candidates, order);
+
+    // print order
+    printf("Query vertex order: ");
+    for(ui i = 0; i < order.size(); i++) {
+        printf("%d ", order[i]);
+    }
+    printf("\n");
 
     vector<vector<pair<ui, ui> > > M_ANS;
     M_ANS.clear();
 
 #ifdef APPROXIMATE_MATCHING_V2
-    Approximate_Matching_v2(data_graph, query_graph, candidates, order, M_ANS, threshold);
+    Approximate_Matching_v2(query_graph, data_graph, candidates, order, M_ANS, threshold);
 #else
-    Approximate_Matching(data_graph, query_graph, candidates, order, M_ANS, threshold);
+    Approximate_Matching(query_graph, data_graph, candidates, order, M_ANS, threshold);
 #endif
     ui count = 0;
     printf("count: %lu\n", M_ANS.size());

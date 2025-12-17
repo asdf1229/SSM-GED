@@ -65,4 +65,10 @@ public:
 	}
 };
 
+struct PairHash {
+    size_t operator()(const std::pair<ui, ui>& p) const {
+        return (size_t(p.first) << 32) ^ p.second;
+    }
+};
+
 #endif

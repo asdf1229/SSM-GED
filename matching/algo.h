@@ -81,10 +81,10 @@ void load_graph(const std::string &input_graph, Graph *graph,
 	return;
 }
 
-bool calVerticesFilter(const Graph *data_graph, const Graph *query_graph,
+bool calVerticesFilter(const Graph *query_graph, const Graph *data_graph,
                        vector<vector<ui> > &candidates) {
     ui qn = query_graph->getVerticesCount();
-    ui dn = data_graph->getVerticesCount();
+    ui gn = data_graph->getVerticesCount();
 
     candidates.clear();
     candidates.resize(qn);
@@ -92,7 +92,7 @@ bool calVerticesFilter(const Graph *data_graph, const Graph *query_graph,
     for (ui i = 0; i < qn; ++i) {
         int label_i = query_graph->getVertexLabel(i);
 
-        for (ui j = 0; j < dn; ++j) {
+        for (ui j = 0; j < gn; ++j) {
             int label_j = data_graph->getVertexLabel(j);
             if (label_i == label_j) candidates[i].push_back(j);
         }
@@ -103,7 +103,7 @@ bool calVerticesFilter(const Graph *data_graph, const Graph *query_graph,
     return true;
 }
 
-void generateQueryOrder(const Graph *data_graph, const Graph *query_graph,
+void generateQueryOrder(const Graph *query_graph, const Graph *data_graph,
                         const vector<vector<ui> > &candidates,
                         vector<ui> &order) {
     ui qn = query_graph->getVerticesCount();
@@ -126,17 +126,17 @@ void generateQueryOrder(const Graph *data_graph, const Graph *query_graph,
     return;
 }
 
-void Approximate_Matching(const Graph *data_graph, const Graph *query_graph,
+void Approximate_Matching(const Graph *query_graph, const Graph *data_graph,
                           vector<vector<ui> > &candidates, 
                           vector<ui> &order,
                           vector<vector<pair<ui, ui> > > &M_ANS,
                           ui threshold)
 {
     ui qn = query_graph->getVerticesCount();
-    ui dn = data_graph->getVerticesCount();
+    ui gn = data_graph->getVerticesCount();
 
     vector<ui> embedding(qn, (ui)(-1));  // embedding[depth] → data vertex
-    vector<ui> vis(dn, 0);
+    vector<ui> vis(gn, 0);
 
     vector<ui> idx(qn, 0);
     vector<ui> idx_count(qn, 0);
@@ -263,6 +263,7 @@ void Approximate_Matching(const Graph *data_graph, const Graph *query_graph,
                     for (ui i = 0; i < qn; ++i) {
                         mapping.push_back(make_pair(order[i], embedding[i]));
                     }
+                    sort(mapping.begin(), mapping.end());
                     M_ANS.push_back(mapping);
                 }
 
@@ -291,78 +292,73 @@ void Approximate_Matching(const Graph *data_graph, const Graph *query_graph,
     }
 }
 
-// ============================================================
-// Helper: Compute frontier in the query graph
-// ============================================================
-vector<ui> ComputeFrontierQuery(const Graph* query_graph,
-                                const vector<ui>& Mq,
-                                const vector<int>& mapped_q)
+void computeFrontierAndMcand(const Graph *query_graph, const Graph *data_graph,
+                     const vector<int> &mapped_q, const vector<int> &mapped_g,
+                     const vector<pair<ui, ui>> &part_M, const vector<vector<ui> > &candidates,
+                     const unordered_set<pair<ui, ui>, PairHash> X, vector<pair<ui,ui> > &Mcand)
 {
-    ui qn = query_graph->getVerticesCount();
-    vector<char> mark(qn, 0);
-    for (ui u : Mq) mark[u] = 1;
+    Mcand.clear();
 
-    vector<ui> Nq;
+    // part_M = {}
+    if(part_M.empty()) {
+        // select 0 as starting vertex
+        ui u = 0;
+        assert(mapped_q[u] == -1);
+        for(ui v : candidates[u]) {
+            assert(mapped_g[v] == -1);
+            if(X.count({u, v})) continue;
+            Mcand.emplace_back(u, v);
+        }
+        return;
+    }
 
-    for (ui u : Mq) {
-        ui count;
-        const ui* nbrs = query_graph->getVertexNeighbors(u, count);
-        for (ui i = 0; i < count; ++i) {
-            ui w = nbrs[i];
-            if (!mark[w] && mapped_q[w] == -1) {
-                Nq.push_back(w);
+    unordered_set<uint64_t> seen;
+    for(auto p : part_M) {
+        ui u = p.first;
+        ui v = p.second;
+
+        ui q_count;
+        const ui* q_neighbors = query_graph->getVertexNeighbors(u, q_count);
+        for(ui i = 0; i < q_count; ++i) {
+            ui u2 = q_neighbors[i];
+            if(mapped_q[u2] != -1) continue;
+
+            ui g_count;
+            const ui* g_neighbors = data_graph->getVertexNeighbors(v, g_count);
+            for(ui j = 0; j < g_count; ++j) {
+                ui v2 = g_neighbors[j];
+
+                if(mapped_g[v2] != -1) continue;
+
+                if(find(candidates[u2].begin(), candidates[u2].end(), v2) == candidates[u2].end())
+                    continue;
+                
+                if(X.count({u2, v2})) continue;
+
+                uint64_t key = (uint64_t(u2) << 32) | v2;
+                if(seen.insert(key).second) {
+                    Mcand.emplace_back(u2, v2);
+                }
             }
         }
+
     }
-    return Nq;
 }
 
 
-// ============================================================
-// Helper: Compute frontier in the data graph
-// ============================================================
-vector<ui> ComputeFrontierData(const Graph* data_graph,
-                               const vector<ui>& Mq,
-                               const vector<ui>& Mg,
-                               const vector<int>& used_v)
-{
-    ui dn = data_graph->getVerticesCount();
-    vector<char> mark(dn, 0);
-    for (ui v : Mg) mark[v] = 1;
-
-    vector<ui> Ng;
-
-    for (ui mapped_v : Mg) {
-        ui count;
-        const ui* nbrs = data_graph->getVertexNeighbors(mapped_v, count);
-        for (ui i = 0; i < count; ++i) {
-            ui w = nbrs[i];
-            if (!mark[w] && !used_v[w]) {
-                Ng.push_back(w);
-            }
-        }
-    }
-    return Ng;
-}
-
-
-// ============================================================
-// Helper: Compute current missing edges based on Mq→Mg mapping
-// ============================================================
-ui CalPartialMissing(const Graph* query_graph,
-                     const Graph* data_graph,
-                     const vector<ui>& Mq,
-                     const vector<ui>& Mg)
+ui calPartialMissing(const Graph *query_graph, const Graph *data_graph,
+                     const vector<pair<ui, ui>> &part_M)
 {
     ui missing = 0;
-    for (ui i = 0; i < Mq.size(); ++i) {
-        ui u = Mq[i];
-        ui vu = Mg[i];
-        for (ui j = i + 1; j < Mq.size(); ++j) {
-            ui w = Mq[j];
-            ui vw = Mg[j];
-            if (query_graph->hasEdge(u, w)) {
-                if (!data_graph->hasEdge(vu, vw))
+    ui mn = part_M.size();
+    for (ui i = 0; i < mn; ++i) {
+        ui u1 = part_M[i].first;
+        ui v1 = part_M[i].second;
+        for (ui j = i + 1; j < mn; ++j) {
+            ui u2 = part_M[j].first;
+            ui v2 = part_M[j].second;
+            if (query_graph->hasEdge(u1, u2)) {
+                if (!data_graph->hasEdge(v1, v2))
                     missing++;
             }
         }
@@ -370,118 +366,88 @@ ui CalPartialMissing(const Graph* query_graph,
     return missing;
 }
 
-// ============================================================
-// Main DFS for Approximate Matching via Bidirectional Adjacency Expansion
-// ============================================================
-void DFS_Approximate(const Graph* data_graph,
-                     const Graph* query_graph,
-                     vector<vector<ui>>& candidates,
-                     vector<vector<char>>& X,             // exclusion set
-                     vector<int>& mapped_q,
-                     vector<int>& used_v,
-                     vector<ui>& Mq,
-                     vector<ui>& Mg,
-                     vector<vector<pair<ui,ui>>>& M_ANS,
+void DFS_Approximate(const Graph *query_graph, const Graph *data_graph,
+                     const vector<vector<ui>> &candidates, unordered_set<pair<ui, ui>, PairHash> X,
+                     vector<int> &mapped_q, vector<int> &mapped_g,
+                     vector<pair<ui, ui>> &part_M, vector<vector<pair<ui,ui>>> &M_ANS,
                      ui threshold)
 {
+#ifndef NDEBUG
+    auto msize = part_M.size();
+    // printf("Current mapping:\n");
+    for(ui i = 0; i < msize; ++i) {
+        ui u = part_M[i].first;
+        ui v = part_M[i].second;
+        assert(u < query_graph->getVerticesCount());
+        assert(v < data_graph->getVerticesCount());
+        assert(mapped_q[u] == static_cast<int>(v));
+        assert(mapped_g[v] == static_cast<int>(u));
+        // printf("%d %d\n", u, v);
+    }
+    // printf("----\n");
+#endif
+
     ui qn = query_graph->getVerticesCount();
 
-    // ---------------------------
-    // Full mapping reached
-    // ---------------------------
-    if (Mq.size() == qn) {
-        ui missing = CalPartialMissing(query_graph, data_graph, Mq, Mg);
-        if (missing <= threshold) {
-            vector<pair<ui,ui>> res;
-            for (ui i = 0; i < Mq.size(); ++i)
-                res.emplace_back(Mq[i], Mg[i]);
-            M_ANS.push_back(res);
-        }
+    if (part_M.size() == qn) {
+        ui missing = calPartialMissing(query_graph, data_graph, part_M);
+        assert(missing <= threshold);
+        M_ANS.push_back(part_M);
         return;
     }
 
-    // ---------------------------
-    // Compute frontiers
-    // ---------------------------
-    vector<ui> Nq = ComputeFrontierQuery(query_graph, Mq, mapped_q);
-    vector<ui> Ng = ComputeFrontierData(data_graph, Mq, Mg, used_v);
+    vector<pair<ui,ui> > Mcand;
+    computeFrontierAndMcand(query_graph, data_graph, mapped_q, mapped_g, part_M, candidates, X, Mcand);
 
-    // 初始时没有 frontier，则选任意未匹配的点作为起点
-    if (Nq.empty()) {
-        for (ui u = 0; u < qn; ++u)
-            if (mapped_q[u] == -1) { Nq.push_back(u); break; }
+    if(Mcand.empty()) {
+        return;
     }
 
-    // ---------------------------
-    // Construct expandable mapping set Mcand
-    // ---------------------------
-    vector<pair<ui,ui>> Mcand;
-
-    for (ui u : Nq) {
-        for (ui v : candidates[u]) {
-            if (mapped_q[u] == -1 && !used_v[v] && !X[u][v]) {
-
-                // 如果 Ng 非空，则 v 必须在 Ng 中
-                if (!Ng.empty() && find(Ng.begin(), Ng.end(), v) == Ng.end())
-                    continue;
-
-                Mcand.emplace_back(u, v);
-            }
-        }
-    }
-
-    // ---------------------------
-    // Enumerate branches
-    // ---------------------------
-    for (auto &p : Mcand) {
+    for (auto p : Mcand) {
         ui u = p.first;
         ui v = p.second;
 
-        // extend mapping
+        assert(X.count({u, v}) == 0);
+        assert(mapped_q[u] == -1);
+        assert(mapped_g[v] == -1);
         mapped_q[u] = v;
-        used_v[v] = 1;
-        Mq.push_back(u);
-        Mg.push_back(v);
+        mapped_g[v] = u;
+        part_M.emplace_back(u, v);
 
-        ui missing = CalPartialMissing(query_graph, data_graph, Mq, Mg);
+        ui missing = calPartialMissing(query_graph, data_graph, part_M);
         if (missing <= threshold) {
-            DFS_Approximate(data_graph, query_graph, candidates, X,
-                            mapped_q, used_v, Mq, Mg, M_ANS, threshold);
+            DFS_Approximate(query_graph, data_graph, candidates, X,
+                            mapped_q, mapped_g, part_M, M_ANS, threshold);
         }
 
-        // backtrack
         mapped_q[u] = -1;
-        used_v[v] = 0;
-        Mq.pop_back();
-        Mg.pop_back();
+        mapped_g[v] = -1;
+        part_M.pop_back();
 
-        // exclusion set update
-        X[u][v] = 1;
+        X.insert({u, v});
     }
 }
 
 // ============================================================
 // Top-level function: Approximate_Matching_v2
 // ============================================================
-void Approximate_Matching_v2(const Graph *data_graph,
-                             const Graph *query_graph,
+void Approximate_Matching_v2(const Graph *query_graph, const Graph *data_graph,
                              vector<vector<ui> > &candidates, 
                              vector<ui> &order, // unused in v2
                              vector<vector<pair<ui, ui> > > &M_ANS,
                              ui threshold)
 {
     ui qn = query_graph->getVerticesCount();
-    ui dn = data_graph->getVerticesCount();
+    ui gn = data_graph->getVerticesCount();
 
     M_ANS.clear();
-    if (qn == 0) return;
+    assert(qn && gn);
 
     vector<int> mapped_q(qn, -1);
-    vector<int> used_v(dn, 0);
-    vector<vector<char>> X(qn, vector<char>(dn, 0));  // exclusion set
+    vector<int> mapped_g(gn, -1);
+    unordered_set<pair<ui, ui>, PairHash> X;
+    vector<pair<ui, ui>> part_M; // (Mq, Mg)
 
-    vector<ui> Mq, Mg;  // matched sets (order varies dynamically)
-
-    DFS_Approximate(data_graph, query_graph, candidates, X,
-                    mapped_q, used_v, Mq, Mg, M_ANS, threshold);
+    DFS_Approximate(query_graph, data_graph, candidates, X,
+                    mapped_q, mapped_g, part_M, M_ANS, threshold);
 }
